@@ -1495,24 +1495,44 @@ IS-PNG is non-nil for PNG, nil for PPM.
 VP-ROW and VP-COL are viewport-relative coordinates (VP-ROW may be negative).
 GRID-COLS and GRID-ROWS are the cell dimensions.
 PIXEL-W and PIXEL-H are the rendered pixel dimensions."
+  (ignore pixel-w pixel-h)
   (when (display-graphic-p)
     (condition-case err
+        ;; Size the image to fill its grid cells, matching how real
+        ;; terminals render kitty images (even small images fill full
+        ;; cell rows).
         (let ((img (create-image data (if is-png 'png 'pbm) t
-                                 :width pixel-w :height pixel-h)))
+                                 :width (* grid-cols (frame-char-width))
+                                 :height (* grid-rows (frame-char-height)))))
           (save-excursion
             (goto-char (point-min))
-            ;; VP-ROW may be negative for partially visible images.
-            ;; Clamp to 0 so we at least show the visible portion.
             (let ((row (max 0 vp-row)))
               (when (zerop (forward-line row))
-                (let ((start (min (+ (point) vp-col) (line-end-position))))
-                  (when (zerop (forward-line (max 1 (1- grid-rows))))
-                    (let ((end (min (+ (point) vp-col grid-cols)
-                                    (line-end-position))))
-                      (when (< start end)
+                (let* ((start (min (+ (point) vp-col) (line-end-position)))
+                       (_ (forward-line (1- (max 1 grid-rows))))
+                       (end (min (+ (point) vp-col grid-cols)
+                                 (line-end-position))))
+                  (if (< start end)
+                      ;; Line has enough text — use text property.
+                      (progn
                         (put-text-property start end 'display img)
-                        (setq ghostel--kitty-active t)))))))))
+                        (setq ghostel--kitty-active t))
+                    ;; Line is empty (trailing blanks trimmed by render).
+                    ;; Use an overlay so we don't eat the newline.
+                    (let ((ov (make-overlay start start)))
+                      (overlay-put ov 'before-string
+                                   (propertize " " 'display img))
+                      (overlay-put ov 'ghostel-kitty t)
+                      (setq ghostel--kitty-active t))))))))
       (error (message "ghostel: kitty image error: %S" err)))))
+
+(defun ghostel--kitty-clear-overlays ()
+  "Remove kitty image overlays from the buffer."
+  (when ghostel--kitty-active
+    (dolist (ov (overlays-in (point-min) (point-max)))
+      (when (overlay-get ov 'ghostel-kitty)
+        (delete-overlay ov)))
+    (setq ghostel--kitty-active nil)))
 
 
 
@@ -2241,6 +2261,7 @@ interrupted by live output updating the terminal cursor."
                  (inhibit-read-only t)
                  (inhibit-redisplay t)
                  (inhibit-modification-hooks t))
+            (ghostel--kitty-clear-overlays)
             (ghostel--redraw ghostel--term ghostel-full-redraw)
             (when saved-marker
               (goto-char saved-marker)
