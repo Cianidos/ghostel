@@ -1526,6 +1526,61 @@ PIXEL-W and PIXEL-H are the rendered pixel dimensions."
                       (setq ghostel--kitty-active t))))))))
       (error (message "ghostel: kitty image error: %S" err)))))
 
+(defun ghostel--kitty-display-virtual (data is-png)
+  "Display a virtual kitty graphics placement (unicode placeholders).
+Searches the buffer for U+10EEEE placeholder characters and overlays
+per-row image slices on the placeholder regions of each line.
+DATA is a unibyte string (PNG or PPM).  IS-PNG is non-nil for PNG."
+  (when (display-graphic-p)
+    (condition-case err
+        (let ((placeholder (string #x10EEEE))
+              (cw (frame-char-width))
+              (ch (frame-char-height))
+              grid-cols grid-rows img)
+          (save-excursion
+            ;; First pass: measure the grid by scanning all placeholders.
+            (goto-char (point-min))
+            (let ((first-line-cols 0)
+                  (total-rows 0)
+                  (prev-line -1))
+              (while (search-forward placeholder nil t)
+                (let ((line (line-number-at-pos (match-beginning 0))))
+                  (when (/= line prev-line)
+                    (setq total-rows (1+ total-rows))
+                    (setq prev-line line))
+                  (when (= total-rows 1)
+                    (setq first-line-cols (1+ first-line-cols)))))
+              (setq grid-cols (max 1 first-line-cols))
+              (setq grid-rows (max 1 total-rows)))
+            ;; Create the image sized to the full grid.
+            (setq img (create-image data (if is-png 'png 'pbm) t
+                                    :width (* grid-cols cw)
+                                    :height (* grid-rows ch)))
+            ;; Second pass: apply per-row slices on placeholder regions.
+            (goto-char (point-min))
+            (let ((row 0)
+                  (current-line -1))
+              (while (search-forward placeholder nil t)
+                (let* ((pos (match-beginning 0))
+                       (line (line-number-at-pos pos)))
+                  (when (/= line current-line)
+                    ;; New line — replace from first placeholder to end of
+                    ;; line (covers all combining diacritics too).
+                    (setq current-line line)
+                    (let ((line-start pos)
+                          (line-end (save-excursion
+                                     (goto-char pos)
+                                     (line-end-position))))
+                      (when (> line-end line-start)
+                        (put-text-property
+                         line-start line-end 'display
+                         (list (list 'slice 0 (* row ch)
+                                     (* grid-cols cw) ch)
+                               img))
+                        (setq ghostel--kitty-active t)))
+                    (setq row (1+ row))))))))
+      (error (message "ghostel: kitty virtual image error: %S" err)))))
+
 (defun ghostel--kitty-clear-overlays ()
   "Remove kitty image overlays from the buffer."
   (when ghostel--kitty-active

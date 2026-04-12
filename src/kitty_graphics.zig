@@ -44,19 +44,41 @@ fn emitOnePlacement(
     graphics: gt.KittyGraphics,
     iterator: gt.KittyGraphicsPlacementIterator,
 ) !void {
-    // Get image ID for this placement.
+    // Get image ID and check if virtual.
     var image_id: u32 = 0;
+    var is_virtual: bool = false;
     if (gt.c.ghostty_kitty_graphics_placement_get(
         iterator,
         gt.c.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID,
         @ptrCast(&image_id),
     ) != gt.SUCCESS) return error.PlacementQuery;
+    _ = gt.c.ghostty_kitty_graphics_placement_get(
+        iterator,
+        gt.c.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IS_VIRTUAL,
+        @ptrCast(&is_virtual),
+    );
 
     // Look up the image.
     const image = gt.c.ghostty_kitty_graphics_image(graphics, image_id) orelse return error.ImageNotFound;
 
-    // Get render info in one call.
-    var info: gt.KittyGraphicsPlacementRenderInfo = undefined;
+    if (is_virtual) {
+        // Virtual placements (yazi-style U+10EEEE unicode placeholders).
+        // The API doesn't provide viewport positions — Elisp searches
+        // the buffer for placeholder characters.
+        const emacs_data = try getImageData(image);
+        defer if (emacs_data.allocated) std.heap.c_allocator.free(emacs_data.data);
+
+        const img_val = env.makeUnibyteString(emacs_data.data) orelse return error.MakeString;
+        var args = [_]emacs.Value{
+            img_val,
+            if (emacs_data.is_png) env.intern("t") else env.nil(),
+        };
+        _ = env.funcall(emacs.sym.@"ghostel--kitty-display-virtual", &args);
+        return;
+    }
+
+    // Non-virtual: get render info for viewport position.
+    var info = std.mem.zeroes(gt.KittyGraphicsPlacementRenderInfo);
     info.size = @sizeOf(gt.KittyGraphicsPlacementRenderInfo);
     if (gt.c.ghostty_kitty_graphics_placement_render_info(
         iterator,
@@ -67,7 +89,30 @@ fn emitOnePlacement(
 
     if (!info.viewport_visible) return error.NotVisible;
 
-    // Get image data.
+    const emacs_data = try getImageData(image);
+    defer if (emacs_data.allocated) std.heap.c_allocator.free(emacs_data.data);
+
+    const img_val = env.makeUnibyteString(emacs_data.data) orelse return error.MakeString;
+    var args = [_]emacs.Value{
+        img_val,
+        if (emacs_data.is_png) env.intern("t") else env.nil(),
+        env.makeInteger(@intCast(info.viewport_row)),
+        env.makeInteger(@intCast(info.viewport_col)),
+        env.makeInteger(@intCast(info.grid_cols)),
+        env.makeInteger(@intCast(info.grid_rows)),
+        env.makeInteger(@intCast(info.pixel_width)),
+        env.makeInteger(@intCast(info.pixel_height)),
+    };
+    _ = env.funcall(emacs.sym.@"ghostel--kitty-display-image", &args);
+}
+
+const ImageData = struct {
+    data: []const u8,
+    is_png: bool,
+    allocated: bool,
+};
+
+fn getImageData(image: gt.KittyGraphicsImage) !ImageData {
     var format: gt.KittyImageFormat = undefined;
     var img_width: u32 = 0;
     var img_height: u32 = 0;
@@ -98,35 +143,31 @@ fn emitOnePlacement(
 
     if (data_len == 0 or img_width == 0 or img_height == 0) return error.EmptyImage;
 
-    // Convert to a format Emacs can display.
     const pixel_data = data_ptr[0..data_len];
-    var is_png = false;
-    const emacs_data = switch (format) {
-        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_PNG => blk: {
-            is_png = true;
-            break :blk pixel_data;
+    return switch (format) {
+        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_PNG => .{ .data = pixel_data, .is_png = true, .allocated = false },
+        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_RGBA => .{
+            .data = createPpm(pixel_data, img_width, img_height, 4) orelse return error.PpmConvert,
+            .is_png = false,
+            .allocated = true,
         },
-        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_RGBA => createPpm(pixel_data, img_width, img_height, 4) orelse return error.PpmConvert,
-        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_RGB => createPpm(pixel_data, img_width, img_height, 3) orelse return error.PpmConvert,
-        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_GRAY_ALPHA => createPpm(pixel_data, img_width, img_height, 2) orelse return error.PpmConvert,
-        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_GRAY => createPpm(pixel_data, img_width, img_height, 1) orelse return error.PpmConvert,
+        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_RGB => .{
+            .data = createPpm(pixel_data, img_width, img_height, 3) orelse return error.PpmConvert,
+            .is_png = false,
+            .allocated = true,
+        },
+        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_GRAY_ALPHA => .{
+            .data = createPpm(pixel_data, img_width, img_height, 2) orelse return error.PpmConvert,
+            .is_png = false,
+            .allocated = true,
+        },
+        gt.c.GHOSTTY_KITTY_IMAGE_FORMAT_GRAY => .{
+            .data = createPpm(pixel_data, img_width, img_height, 1) orelse return error.PpmConvert,
+            .is_png = false,
+            .allocated = true,
+        },
         else => return error.UnsupportedFormat,
     };
-    defer if (!is_png) std.heap.c_allocator.free(emacs_data);
-
-    // Call Elisp: (ghostel--kitty-display-image DATA IS-PNG VP-ROW VP-COL GRID-COLS GRID-ROWS PIXEL-W PIXEL-H)
-    const img_val = env.makeUnibyteString(emacs_data) orelse return error.MakeString;
-    var args = [_]emacs.Value{
-        img_val,
-        if (is_png) env.intern("t") else env.nil(),
-        env.makeInteger(@intCast(info.viewport_row)),
-        env.makeInteger(@intCast(info.viewport_col)),
-        env.makeInteger(@intCast(info.grid_cols)),
-        env.makeInteger(@intCast(info.grid_rows)),
-        env.makeInteger(@intCast(info.pixel_width)),
-        env.makeInteger(@intCast(info.pixel_height)),
-    };
-    _ = env.funcall(emacs.sym.@"ghostel--kitty-display-image", &args);
 }
 
 /// Convert raw pixel data to PPM (P6) format for Emacs.
@@ -152,27 +193,23 @@ fn createPpm(data: []const u8, width: u32, height: u32, channels: u32) ?[]u8 {
         const src_off = i * channels;
         switch (channels) {
             1 => {
-                // Gray → RGB
                 const g = data[src_off];
                 dst[i * 3 + 0] = g;
                 dst[i * 3 + 1] = g;
                 dst[i * 3 + 2] = g;
             },
             2 => {
-                // Gray+Alpha → RGB (discard alpha)
                 const g = data[src_off];
                 dst[i * 3 + 0] = g;
                 dst[i * 3 + 1] = g;
                 dst[i * 3 + 2] = g;
             },
             3 => {
-                // RGB passthrough
                 dst[i * 3 + 0] = data[src_off + 0];
                 dst[i * 3 + 1] = data[src_off + 1];
                 dst[i * 3 + 2] = data[src_off + 2];
             },
             4 => {
-                // RGBA → RGB (discard alpha)
                 dst[i * 3 + 0] = data[src_off + 0];
                 dst[i * 3 + 1] = data[src_off + 1];
                 dst[i * 3 + 2] = data[src_off + 2];

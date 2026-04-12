@@ -325,6 +325,7 @@ pub const Sym = struct {
     @"ghostel--flush-output": Value,
     @"ghostel--set-title": Value,
     @"ghostel--kitty-display-image": Value,
+    @"ghostel--kitty-display-virtual": Value,
     png: Value,
     pbm: Value,
     ding: Value,
