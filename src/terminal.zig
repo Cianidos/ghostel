@@ -5,8 +5,6 @@
 const std = @import("std");
 const gt = @import("ghostty.zig");
 const emacs = @import("emacs.zig");
-const kitty_graphics = @import("kitty_graphics.zig");
-
 const Self = @This();
 
 /// The libghostty terminal handle.
@@ -56,13 +54,6 @@ resize_pending: bool = false,
 /// pushed) when `total_rows` is plateaued at the cap. Zero means "no
 /// scrollback" or "not yet sampled".
 first_scrollback_row_hash: u64 = 0,
-
-/// Cell pixel dimensions (for image sizing).
-cell_width_px: u32 = 1,
-cell_height_px: u32 = 1,
-
-/// Kitty graphics image store.
-image_store: kitty_graphics.ImageStore = kitty_graphics.ImageStore.init(),
 
 /// Cached Emacs env pointer — only valid during a callback from Emacs.
 env: ?emacs.Env = null,
@@ -125,7 +116,6 @@ pub fn init(cols: u16, rows: u16, max_scrollback: usize) !Self {
 
 /// Free all ghostty resources.
 pub fn deinit(self: *Self) void {
-    self.image_store.deinit();
     gt.c.ghostty_mouse_encoder_free(self.mouse_encoder);
     gt.c.ghostty_key_encoder_free(self.key_encoder);
     gt.c.ghostty_render_state_row_cells_free(self.row_cells);
@@ -186,6 +176,15 @@ pub fn setPwd(self: *Self, pwd: *const gt.GhosttyString) !void {
     try self.terminalSet(gt.OPT_PWD, pwd);
 }
 
+/// Enable kitty graphics protocol with given storage limit (bytes).
+pub fn enableKittyGraphics(self: *Self, storage_limit: usize) !void {
+    try self.terminalSet(gt.OPT_KITTY_IMAGE_STORAGE_LIMIT, @ptrCast(&storage_limit));
+    const yes: bool = true;
+    try self.terminalSet(gt.OPT_KITTY_IMAGE_MEDIUM_FILE, @ptrCast(&yes));
+    try self.terminalSet(gt.OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE, @ptrCast(&yes));
+    try self.terminalSet(gt.OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM, @ptrCast(&yes));
+}
+
 /// Get the current color palette (256 entries).
 pub fn getColorPalette(self: *Self, palette: *[256]gt.ColorRgb) bool {
     return gt.c.ghostty_terminal_get(
@@ -241,8 +240,6 @@ pub fn resize(self: *Self, cols: u16, rows: u16, cell_w: u32, cell_h: u32) !void
     self.scrollback_in_buffer = 0;
     self.first_scrollback_row_hash = 0;
     self.resize_pending = true;
-    self.cell_width_px = cell_w;
-    self.cell_height_px = cell_h;
 }
 
 /// Get the cursor column position (0-indexed).

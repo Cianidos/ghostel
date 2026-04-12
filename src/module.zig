@@ -10,6 +10,7 @@ const gt = @import("ghostty.zig");
 const render = @import("render.zig");
 const input = @import("input.zig");
 const kitty_graphics = @import("kitty_graphics.zig");
+const sys = @import("sys.zig");
 
 const c = emacs.c;
 
@@ -53,6 +54,10 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     env.bindFunction("ghostel--scrollback-rows", 1, 1, &fnScrollbackRows, "Return the number of scrollback rows.\n\n(ghostel--scrollback-rows TERM)");
 
     emacs.initSymbols(env);
+
+    // Install system callbacks (PNG decoder for kitty graphics, logging).
+    sys.init();
+
     env.provide("ghostel-module");
     return 0;
 }
@@ -110,6 +115,9 @@ fn fnNew(raw_env: ?*c.emacs_env, nargs: isize, args: [*c]c.emacs_value, _: ?*any
     term.setColorForeground(&default_fg) catch {};
     term.setColorBackground(&default_bg) catch {};
 
+    // Enable kitty graphics protocol (320 MiB storage, all mediums).
+    term.enableKittyGraphics(320 * 1024 * 1024) catch {};
+
     return env.makeUserPtr(&Terminal.emacsFinalize, term);
 }
 
@@ -162,8 +170,7 @@ fn fnWriteInput(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*
 
     if (extra_cr == 0) {
         // No normalization needed — feed raw data directly.
-        // Process via kitty_graphics to intercept APC_G sequences.
-        kitty_graphics.processData(env, term, raw);
+        term.vtWrite(raw);
     } else {
         // Need to insert \r before bare \n.
         const out_len = raw.len + extra_cr;
@@ -190,8 +197,7 @@ fn fnWriteInput(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*
             norm_buf[npos] = raw[i];
             npos += 1;
         }
-        // Process via kitty_graphics to intercept APC_G sequences.
-        kitty_graphics.processData(env, term, norm_buf[0..npos]);
+        term.vtWrite(norm_buf[0..npos]);
     }
 
     // Scan for OSC sequences that libghostty-vt discards.
@@ -489,12 +495,12 @@ fn fnSetSize(raw_env: ?*c.emacs_env, nargs: isize, args: [*c]c.emacs_value, _: ?
     const cell_w: u32 = if (nargs > 3 and env.isNotNil(args[3]))
         @intCast(env.extractInteger(args[3]))
     else
-        term.cell_width_px;
+        1;
 
     const cell_h: u32 = if (nargs > 4 and env.isNotNil(args[4]))
         @intCast(env.extractInteger(args[4]))
     else
-        term.cell_height_px;
+        1;
 
     term.resize(cols, rows, cell_w, cell_h) catch {
         env.signalError("ghostel: resize failed");
@@ -537,6 +543,7 @@ fn fnRedraw(raw_env: ?*c.emacs_env, nargs: isize, args: [*c]c.emacs_value, _: ?*
     const term = env.getUserPtr(Terminal, args[0]) orelse return env.nil();
     const force_full = nargs > 1 and env.isNotNil(args[1]);
     render.redraw(env, term, force_full);
+    kitty_graphics.emitPlacements(env, term);
     return env.nil();
 }
 

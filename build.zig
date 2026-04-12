@@ -33,6 +33,10 @@ pub fn build(b: *std.Build) void {
     // Project headers (emacs-module-wrapper.h for musl compatibility)
     mod.addIncludePath(b.path("src"));
 
+    // stb_image for PNG decoding (kitty graphics)
+    mod.addIncludePath(b.path("vendor/stb"));
+    mod.addCSourceFile(.{ .file = b.path("src/stb_image.c") });
+
     // libghostty-vt headers — try both source tree and build output
     mod.addIncludePath(b.path("vendor/ghostty/include"));
     mod.addIncludePath(b.path("vendor/ghostty/zig-out/include"));
@@ -101,6 +105,7 @@ pub fn build(b: *std.Build) void {
     }
 
     check_mod.addIncludePath(b.path("src"));
+    check_mod.addIncludePath(b.path("vendor/stb"));
     check_mod.addIncludePath(b.path("vendor/ghostty/include"));
     check_mod.addIncludePath(b.path("vendor/ghostty/zig-out/include"));
 

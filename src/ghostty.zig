@@ -64,6 +64,31 @@ pub const DATA_COLOR_PALETTE = c.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE;
 pub const DATA_COLOR_FOREGROUND = c.GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND;
 pub const DATA_COLOR_BACKGROUND = c.GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND;
 
+// Kitty graphics terminal options
+pub const OPT_KITTY_IMAGE_STORAGE_LIMIT = c.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT;
+pub const OPT_KITTY_IMAGE_MEDIUM_FILE = c.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE;
+pub const OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE = c.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE;
+pub const OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM = c.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM;
+pub const DATA_KITTY_GRAPHICS = c.GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS;
+
+// Kitty graphics types
+pub const KittyGraphics = c.GhosttyKittyGraphics;
+pub const KittyGraphicsImage = c.GhosttyKittyGraphicsImage;
+pub const KittyGraphicsPlacementIterator = c.GhosttyKittyGraphicsPlacementIterator;
+pub const KittyGraphicsPlacementRenderInfo = c.GhosttyKittyGraphicsPlacementRenderInfo;
+pub const KittyGraphicsData = c.GhosttyKittyGraphicsData;
+pub const KittyGraphicsPlacementData = c.GhosttyKittyGraphicsPlacementData;
+pub const KittyGraphicsImageData = c.GhosttyKittyGraphicsImageData;
+pub const KittyPlacementLayer = c.GhosttyKittyPlacementLayer;
+pub const KittyImageFormat = c.GhosttyKittyImageFormat;
+pub const KittyImageCompression = c.GhosttyKittyImageCompression;
+pub const KittyGraphicsPlacementIteratorOption = c.GhosttyKittyGraphicsPlacementIteratorOption;
+
+// System interface types
+pub const SysOption = c.GhosttySysOption;
+pub const SysImage = c.GhosttySysImage;
+pub const SysLogLevel = c.GhosttySysLogLevel;
+
 // Terminal data constants
 pub const DATA_COLS = c.GHOSTTY_TERMINAL_DATA_COLS;
 pub const DATA_ROWS = c.GHOSTTY_TERMINAL_DATA_ROWS;
